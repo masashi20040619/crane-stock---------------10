@@ -1142,7 +1142,7 @@ const App: React.FC = () => {
           <div className="animate-in fade-in slide-in-from-bottom-2 duration-300">
             <div className="flex justify-between items-end mb-6">
               <h2 className="text-xl font-black">データ管理</h2>
-              <p className="text-[10px] font-bold text-slate-400 mb-1">Version 4.0.1</p>
+              <p className="text-[10px] font-bold text-slate-400 mb-1">Version 4.0.2</p>
             </div>
             
             <div className="space-y-6">

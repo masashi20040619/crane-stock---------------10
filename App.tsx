@@ -51,28 +51,50 @@ function parseLastNumber(text: string): number | null {
   return m ? Number(m[1]) : null;
 }
 
+/** 履歴同期用（内容が変わったときだけ親 state を更新する） */
+function historyContentKey(p: Prize): string {
+  return JSON.stringify(
+    (p.history ?? []).map(h => [h.id, h.timestamp, h.action, h.type, h.quantity, h.unitPrice, h.price])
+  );
+}
+
+function ensureHistoryIds(prize: Prize): Prize {
+  const hist = prize.history;
+  if (!hist?.length) return prize;
+  let changed = false;
+  const nextHist = hist.map(h => {
+    if (h.id && String(h.id).length > 0) return h;
+    changed = true;
+    return { ...h, id: Math.random().toString(36).substring(2, 11) };
+  });
+  return changed ? { ...prize, history: nextHist } : prize;
+}
+
 function deriveQuantityFromHistory(prize: Prize): number {
   const history = prize.history || [];
   if (history.length === 0) return prize.quantity;
 
-  // まず「登録/在庫数変更」があればそれを起点にし、なければ現在値を起点にする
-  let base: number | null = null;
   const sorted = [...history].sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
 
-  for (const h of sorted) {
+  // 最後の「新規登録」を在庫の起点にする（それより前の売買は無視＝削除済みと整合）
+  let lastRegIdx = -1;
+  let base = prize.quantity ?? 0;
+  for (let i = 0; i < sorted.length; i++) {
+    const h = sorted[i];
     if (h.action === 'registration') {
+      lastRegIdx = i;
       if (typeof h.quantity === 'number') base = h.quantity;
       else {
         const n = parseLastNumber(h.details);
-        if (typeof n === 'number' && !Number.isNaN(n)) base = n;
+        base = typeof n === 'number' && !Number.isNaN(n) ? n : 0;
       }
-      break;
     }
   }
-  if (base === null) base = prize.quantity ?? 0;
 
   let q = base;
-  for (const h of sorted) {
+  const startIdx = lastRegIdx < 0 ? 0 : lastRegIdx + 1;
+  for (let i = startIdx; i < sorted.length; i++) {
+    const h = sorted[i];
     if (h.action === 'quantity_change') {
       if (typeof h.quantity === 'number') q = h.quantity;
       else {
@@ -91,7 +113,10 @@ function deriveQuantityFromHistory(prize: Prize): number {
 }
 
 function recalcAllFromHistory(prizes: Prize[]): Prize[] {
-  return prizes.map(p => ({ ...p, quantity: deriveQuantityFromHistory(p) }));
+  return prizes.map(p => {
+    const withIds = ensureHistoryIds(p);
+    return { ...withIds, quantity: deriveQuantityFromHistory(withIds) };
+  });
 }
 
 const App: React.FC = () => {
@@ -361,6 +386,34 @@ const App: React.FC = () => {
     };
     initData();
   }, []);
+
+  // 履歴削除などで prizes が更新されたら、開いているモーダル用の景品参照を最新化（古い履歴で上書きされるのを防ぐ）
+  useEffect(() => {
+    if (!isModalOpen) return;
+    setPrizeToEdit(prev => {
+      if (!prev) return prev;
+      const latest = prizes.find(p => p.id === prev.id);
+      if (!latest) return prev;
+      if (historyContentKey(latest) !== historyContentKey(prev) || latest.quantity !== prev.quantity) return latest;
+      return prev;
+    });
+  }, [prizes, isModalOpen]);
+
+  useEffect(() => {
+    setDetailPrize(prev => {
+      if (!prev) return prev;
+      const latest = prizes.find(p => p.id === prev.id);
+      return latest ?? prev;
+    });
+  }, [prizes]);
+
+  useEffect(() => {
+    setHistoryPrize(prev => {
+      if (!prev) return prev;
+      const latest = prizes.find(p => p.id === prev.id);
+      return latest ?? prev;
+    });
+  }, [prizes]);
 
   const handleSaveSpending = useCallback(async (record: SpendingRecord) => {
     setSpendingRecords(prev => [...prev, record]);
